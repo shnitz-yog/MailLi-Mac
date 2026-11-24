@@ -1,0 +1,20 @@
+# Build output
+.build/
+MailLi.app/
+MailLi.dmg
+Resources/
+*.part
+__pycache__/
+.DS_Store
+
+# PRIVATE: real letters / address book / login replies downloaded by tools/probe.py
+tools/samples/
+
+# Server API descriptions downloaded by tools/discover.py (regenerate locally)
+tools/api/
+
+# Googale's own artwork and screenshots (theirs – not redistributed here;
+# the app loads its pictures from Googale's server at runtime, like the Windows app)
+tools/pc_assets/
+tools/pc_screens/
+tools/pc_*overview.png
