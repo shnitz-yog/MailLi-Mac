@@ -50,6 +50,10 @@ struct WriteView: View {
             }
             .disabled(sending || sent)
 
+            if tool == .greetings {
+                GreetingsPicker(selected: $background, done: { tool = .write })
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
             if picking {
                 RecipientPicker(selected: $selected, done: { picking = false })
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
@@ -57,6 +61,7 @@ struct WriteView: View {
             if sending || sent { SendingOverlay(sent: sent) }
         }
         .animation(.easeInOut(duration: 0.2), value: picking)
+        .animation(.easeInOut(duration: 0.2), value: tool)
         .onAppear {
             preselect()
             if selected.isEmpty { picking = true }   // first: who do I write to?
@@ -73,22 +78,35 @@ struct WriteView: View {
             Pill(title: "חזרה", icon: PC.back, symbol: "arrow.right") { close(false) }
                 .keyboardShortcut(.cancelAction)
             Divider().frame(height: 40).padding(.horizontal, 4)
-            PCImage(url: PC.toIcon, fallback: "envelope").frame(width: 50, height: 40)
-            Text("לכבוד:").font(Kid.font(26, .heavy)).foregroundStyle(Kid.ink)
-            ForEach(chosen.prefix(4)) { c in
-                PersonChip(name: c.name, image: c.imageURL) { selected.removeAll { $0 == c.id } }
+            if chosen.isEmpty {
+                // PC: "למי אכתוב?" ‑‑‑‑▶ "לא נבחרו נמענים"
+                Button { picking = true } label: {
+                    HStack(spacing: 8) {
+                        PCImage(url: PC.toWhom, fallback: "person.fill.questionmark").frame(width: 30, height: 30)
+                        Text("למי אכתוב?").font(Kid.font(22, .heavy)).foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, 16).frame(height: 46)
+                    .background(Capsule().fill(Kid.outline))
+                }
+                .buttonStyle(.plain)
+                HStack(spacing: 0) {
+                    Text("‑ ‑ ‑ ‑ ‑ ‑").font(Kid.font(20, .heavy)).foregroundStyle(Kid.outline)
+                    Image(systemName: "arrowtriangle.left.fill").font(.system(size: 16)).foregroundStyle(Kid.outline)
+                }
+                Text("לא נבחרו נמענים").font(Kid.font(30, .heavy)).foregroundStyle(Kid.ink)
+            } else {
+                PCImage(url: PC.toIcon, fallback: "envelope").frame(width: 50, height: 40)
+                Text("לכבוד:").font(Kid.font(26, .heavy)).foregroundStyle(Kid.ink)
+                RecipientChips(chosen: chosen, remove: { id in selected.removeAll { $0 == id } })
+                Button { picking = true } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 22, weight: .bold)).foregroundStyle(Kid.outline)
+                        .frame(width: 46, height: 46)
+                        .background(Circle().fill(.white))
+                        .overlay(Circle().stroke(Kid.chipLine, style: StrokeStyle(lineWidth: 2, dash: [5])))
+                }
+                .buttonStyle(.plain).help("להוסיף נמענים")
             }
-            if chosen.count > 4 {
-                Text("+\(chosen.count - 4)").font(Kid.font(22, .heavy)).foregroundStyle(Kid.ink)
-            }
-            Button { picking = true } label: {
-                Image(systemName: chosen.isEmpty ? "person.crop.circle.badge.plus" : "plus")
-                    .font(.system(size: 24, weight: .bold)).foregroundStyle(Kid.outline)
-                    .frame(width: 54, height: 54)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(.white))
-                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Kid.chipLine, style: StrokeStyle(lineWidth: 2, dash: [5])))
-            }
-            .buttonStyle(.plain).help("למי לשלוח?")
             Spacer()
             if let h = hint {
                 Text(h).font(Kid.font(19, .bold)).foregroundStyle(.white)
@@ -109,16 +127,14 @@ struct WriteView: View {
     @ViewBuilder private var bottomPanel: some View {
         Group {
             switch tool {
-            case .write:
+            case .write, .greetings:
                 if emoji {
                     EmojiPanel(insert: { text += $0 }, back: { emoji = false })
                 } else {
                     HebrewKeyboard(text: $text, emoji: { emoji = true })
                 }
-            case .greetings:
-                GreetingsPanel(selected: $background)
             case .stamps:
-                StampsPanel(colorCode: colorCode, add: addStamp)
+                StampsPanel(colorCode: colorCode, add: addStamp, emoji: { tool = .write; emoji = true })
             case .color:
                 ColorPanel(colorCode: $colorCode)
             case .size:
@@ -217,13 +233,7 @@ struct WriteView: View {
 
     /// Picture of the letter (the server e-mails it to parents), like the Windows app.
     private func renderPNG() async -> Data? {
-        let bg = await cache.preload(background)
-        let view = LetterView(content: letter(), stamps: client.stamps, backgroundImage: bg, export: true)
-            .frame(width: letterSize.width, height: letterSize.height)
-            .environment(\.layoutDirection, .rightToLeft)
-        let r = ImageRenderer(content: view)
-        r.scale = 1
-        guard let img = r.nsImage, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return nil }
+        guard let img = await renderLetter(letter(), stamps: client.stamps), let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return nil }
         return rep.representation(using: .png, properties: [:])
     }
 }
@@ -256,16 +266,15 @@ struct EditableLetter: View {
         return ZStack(alignment: .topLeading) {
             LetterBackground(url: background, k: k)
                 .onTapGesture { focused = true }
-            TextEditor(text: $text)
-                .font(.system(size: fontSize * k, weight: .semibold, design: .rounded))
-                .foregroundStyle(color)
-                .scrollContentBackground(.hidden)
-                .background(Color.clear)
-                .multilineTextAlignment(.leading)                   // leading = right in Hebrew
-                .environment(\.layoutDirection, .rightToLeft)
-                .focused($focused)
-                .frame(width: (letterSize.width - 50) * k, height: max(40, (letterSize.height - top - 10)) * k)
-                .offset(x: 25 * k, y: top * k)
+            // Stamps under the words (as on the PC); while a stamp tool is on,
+            // the text lets clicks through to them.
+            ForEach($stamps) { $s in
+                if let shape = lib.shape(s.url) {
+                    DraggableStamp(shape: shape, stamp: $s, scale: k, tool: tool) { stampTapped(s.id) }
+                }
+            }
+            editor(k, top: top)
+                .allowsHitTesting(tool == .write || tool == .greetings)
             if text.isEmpty {
                 Text("כאן כותבים ✏️")
                     .font(.system(size: fontSize * k, weight: .semibold, design: .rounded))
@@ -275,11 +284,6 @@ struct EditableLetter: View {
                     .offset(x: 25 * k, y: top * k)
                     .allowsHitTesting(false)
             }
-            ForEach($stamps) { $s in
-                if let shape = lib.shape(s.url) {
-                    DraggableStamp(shape: shape, stamp: $s, scale: k, tool: tool) { stampTapped(s.id) }
-                }
-            }
         }
         .frame(width: letterSize.width * k, height: letterSize.height * k, alignment: .topLeading)
         .clipped()
@@ -287,6 +291,29 @@ struct EditableLetter: View {
         .compositingGroup()
         .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
         .environment(\.layoutDirection, .leftToRight)
+    }
+
+    @Environment(\.previewing) private var previewing
+
+    @ViewBuilder private func editor(_ k: CGFloat, top: CGFloat) -> some View {
+        let font = Font.system(size: fontSize * k, weight: .semibold, design: .rounded)
+        Group {
+            if previewing {   // ImageRenderer can't draw the real text box
+                Text(text).font(font).foregroundStyle(color)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                TextEditor(text: $text)
+                    .font(font)
+                    .foregroundStyle(color)
+                    .scrollContentBackground(.hidden)
+                    .background(Color.clear)
+                    .multilineTextAlignment(.leading)                   // leading = right in Hebrew
+                    .focused($focused)
+            }
+        }
+        .environment(\.layoutDirection, .rightToLeft)
+        .frame(width: (letterSize.width - 50) * k, height: max(40, (letterSize.height - top - 10)) * k)
+        .offset(x: 25 * k, y: top * k)
     }
 }
 
@@ -379,7 +406,7 @@ struct HebrewKeyboard: View {
                     ForEach(marks, id: \.self) { ch in Key(label: ch, width: unit, height: h) { text += ch } }
                     Key(label: "רווח", width: max(unit, spaceW), height: h) { text += " " }
                     ForEach(digits, id: \.self) { ch in Key(label: ch, width: unit, height: h) { text += ch } }
-                    Key(image: PC.emoji, symbol: "face.smiling", width: unit * 1.4, height: h, action: emoji)
+                    Key(label: "😊", width: unit * 1.4, height: h, action: emoji).help("אימוג'י")
                 }
             }
         }
@@ -458,29 +485,116 @@ struct EmojiPanel: View {
     }
 }
 
-/// Greeting pictures / backgrounds from the server.
-struct GreetingsPanel: View {
+/// PC "ברכות ורקעים" window: tabs on top, round pictures with their Hebrew names.
+struct GreetingsPicker: View {
     @EnvironmentObject var client: MailLiClient
     @Binding var selected: String?
+    var done: () -> Void
+    @Local private var tab = 0
+
+    private var tabs: [(String, String, Int)] {
+        var t: [(String, String, Int)] = [("ברכות", PC.greetings, 0)]
+        if client.backgrounds.contains(where: { $0.group == 1 }) { t.append(("רציתי לספר", PC.tellIcon, 1)) }
+        return t
+    }
+
     var body: some View {
-        KidScroll(axis: .horizontal) {
-            HStack(spacing: 10) {
-                Button { selected = nil } label: {
-                    Text("בלי ברכה").font(Kid.font(18, .bold)).foregroundStyle(Kid.ink)
-                        .frame(width: 150, height: 96)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(.white))
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected == nil ? Kid.send : .clear, lineWidth: 4))
-                }.buttonStyle(.plain)
-                ForEach(client.backgrounds) { b in
-                    Button { selected = b.url } label: {
-                        PCImage(url: b.url, fallback: "photo").padding(6)
-                            .frame(width: 180, height: 96)
-                            .background(RoundedRectangle(cornerRadius: 10).fill(.white))
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected == b.url ? Kid.send : .clear, lineWidth: 4))
-                    }.buttonStyle(.plain)
+        ZStack {
+            Color.black.opacity(0.25).ignoresSafeArea().onTapGesture(perform: done)
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    Button(action: done) {
+                        HStack(spacing: 6) {
+                            Text("סגירה").font(Kid.font(20, .bold)).foregroundStyle(Kid.ink)
+                            Image(systemName: "xmark").font(.system(size: 18, weight: .heavy)).foregroundStyle(Kid.outline)
+                        }
+                    }
+                    .buttonStyle(.plain).keyboardShortcut(.cancelAction)
                 }
+                .padding(.bottom, 8)
+                VStack(spacing: 0) {
+                    HStack(spacing: 40) {
+                        ForEach(0..<tabs.count, id: \.self) { i in
+                            Button { tab = i } label: {
+                                VStack(spacing: 6) {
+                                    PCImage(url: tabs[i].1, fallback: "gift").padding(14)
+                                        .frame(width: 76, height: 76)
+                                        .background(Circle().fill(.white))
+                                        .overlay(Circle().stroke(tab == i ? Kid.ink : .clear, lineWidth: 2))
+                                    Text(tabs[i].0).font(Kid.font(22, tab == i ? .heavy : .bold)).foregroundStyle(Kid.ink)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity)
+                    .background(Kid.strip)
+                    let group = tabs.indices.contains(tab) ? tabs[tab].2 : 0
+                    let list = client.backgrounds.filter { $0.group == group }
+                    GeometryReader { geo in
+                        KidScroll {
+                            IndexGrid(count: list.count + 1, columns: max(3, Int((geo.size.width - 20) / 118)), spacing: 12) { i in
+                                if i == 0 {
+                                    cell(title: "בלי ברכה", icon: nil, on: selected == nil) { selected = nil; done() }
+                                } else {
+                                    let b = list[i - 1]
+                                    cell(title: b.title.isEmpty ? b.name : b.title, icon: b.icon, fallbackURL: b.url,
+                                         on: selected == b.url) { selected = b.url; done() }
+                                }
+                            }
+                            .padding(16)
+                        }
+                    }
+                    .background(.white)
+                }
+                .background(RoundedRectangle(cornerRadius: 18).fill(.white))
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+                .overlay(RoundedRectangle(cornerRadius: 18).stroke(Kid.strip, lineWidth: 6))
             }
-            .padding(12)
+            .padding(24)
+            .frame(maxWidth: 1060, maxHeight: 700)
+            .background(RoundedRectangle(cornerRadius: 24).fill(.white))
+            .padding(24)
+        }
+    }
+
+    private func cell(title: String, icon: String?, fallbackURL: String? = nil, on: Bool,
+                      action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Group {
+                    if let icon {
+                        GreetingIcon(icon: icon, fallback: fallbackURL)
+                    } else {
+                        Image(systemName: "nosign").font(.system(size: 34)).foregroundStyle(Kid.outline)
+                    }
+                }
+                .frame(width: 80, height: 80)
+                Text(title).font(Kid.font(15, .bold)).foregroundStyle(Kid.ink)
+                    .lineLimit(2).multilineTextAlignment(.center).minimumScaleFactor(0.8)
+                    .frame(height: 36)
+            }
+            .frame(maxWidth: .infinity).padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Kid.strip.opacity(0.6)))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(on ? Kid.send : .clear, lineWidth: 4))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Round greeting button picture; if the server has none, the greeting itself.
+struct GreetingIcon: View {
+    var icon: String
+    var fallback: String?
+    @ObservedObject private var cache = ImageCache.shared
+    var body: some View {
+        if let i = cache.image(icon) {
+            Image(nsImage: i).resizable().scaledToFit()
+        } else {
+            PCImage(url: fallback, fallback: "gift").padding(6)
+                .background(Circle().fill(.white)).clipShape(Circle())
         }
     }
 }
@@ -489,25 +603,44 @@ struct StampsPanel: View {
     @EnvironmentObject var client: MailLiClient
     var colorCode: Int
     var add: (String) -> Void
+    var emoji: () -> Void = {}
     var body: some View {
-        KidScroll(axis: .horizontal) {
+        GeometryReader { geo in
             let all = client.stampChoices
-            let half = (all.count + 1) / 2
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach([0, 1], id: \.self) { row in
-                    HStack(spacing: 8) {
-                        ForEach(Array(all.enumerated()).filter { (row == 0) == ($0.offset < half) }, id: \.offset) { _, s in
-                            Button { add(s.url) } label: {
-                                StampThumb(url: s.url, color: KidStyle.color(colorCode), stamps: client.stamps)
-                                    .frame(width: 50, height: 50)
-                                    .background(RoundedRectangle(cornerRadius: 10).fill(.white))
-                            }.buttonStyle(.plain)
+            let cols = max(1, (all.count + 1) / 2)
+            let spacing: CGFloat = 8
+            let emojiW: CGFloat = 110
+            // Stamps fill the panel's width (two rows), not bunched to one side.
+            let cell = max(40, min(64, (geo.size.width - emojiW - 40 - spacing * CGFloat(cols - 1)) / CGFloat(cols),
+                                   (geo.size.height - 20 - spacing) / 2))
+            HStack(spacing: 14) {
+                Button(action: emoji) {
+                    VStack(spacing: 4) {
+                        Text("😊").font(.system(size: 40))
+                        Text("אימוג'י").font(Kid.font(18, .bold)).foregroundStyle(Kid.ink)
+                    }
+                    .frame(width: emojiW, height: cell * 2 + spacing)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(.white))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Kid.outline, lineWidth: 2))
+                }
+                .buttonStyle(.plain).help("להוסיף אימוג'י למכתב")
+                VStack(alignment: .leading, spacing: spacing) {
+                    ForEach([0, 1], id: \.self) { row in
+                        HStack(spacing: spacing) {
+                            ForEach(Array(all.enumerated()).filter { (row == 0) == ($0.offset < cols) }, id: \.offset) { _, s in
+                                Button { add(s.url) } label: {
+                                    StampThumb(url: s.url, color: KidStyle.color(colorCode), stamps: client.stamps)
+                                        .frame(width: cell, height: cell)
+                                        .background(RoundedRectangle(cornerRadius: 10).fill(.white))
+                                }.buttonStyle(.plain)
+                            }
                         }
                     }
                 }
             }
-            .padding(10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .padding(10)
     }
 }
 
@@ -566,68 +699,165 @@ struct HintPanel<Extra: View>: View {
 
 // MARK: - Who gets the letter (opens first, like the PC "למי אכתוב?")
 
+/// "לכבוד:" chips: the first few people, then "+N" (as on the PC).
+struct RecipientChips: View {
+    var chosen: [Contact]
+    var remove: (UUID) -> Void
+    var max = 3
+    var body: some View {
+        ForEach(chosen.prefix(max)) { c in
+            PersonChip(name: c.name, image: c.imageURL) { remove(c.id) }
+        }
+        if chosen.count > max {
+            Text("+\(chosen.count - max)").font(Kid.font(20, .bold)).foregroundStyle(Kid.ink)
+                .frame(width: 50, height: 50)
+                .background(Circle().fill(.white))
+                .overlay(Circle().stroke(Kid.chipLine, lineWidth: 2))
+        }
+    }
+}
+
+/// PC recipient screen: "לכבוד:" strip with the chosen people and a green "המשך";
+/// folder tabs per group; "סימון כל …" to take a whole group; cards with a circle.
 struct RecipientPicker: View {
     @EnvironmentObject var client: MailLiClient
     @Binding var selected: [UUID]
     var done: () -> Void
-    @Local private var tab = 0
+    var startTab = 0
+    @Local private var tab = -1
 
-    private let tabs: [(String, String, String, [String])] = [
+    private static let allTabs: [(String, String, String, [String])] = [
         ("המשפחה שלי", PC.family, "house.fill", ["משפחה"]),
         ("הגננת והצוות", PC.staff, "person.2.fill", ["הגננת", "צוות הגן"]),
-        ("החברים בגן", PC.friends, "face.smiling.fill", ["חברים בגן", "חברים"]),
+        ("ילדי הגן", PC.friends, "face.smiling.fill", ["חברים בגן"]),
+        ("ידידי הגן", PC.friends, "person.3.fill", ["חברים"]),
     ]
+    private var tabs: [(String, String, String, [String])] {
+        Self.allTabs.filter { t in client.contacts.contains { t.3.contains($0.group) } }
+    }
+    private var chosen: [Contact] { selected.compactMap { id in client.contacts.first { $0.id == id } } }
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.25).ignoresSafeArea().onTapGesture(perform: done)
-            VStack(spacing: 16) {
-                HStack(spacing: 14) {
-                    PCImage(url: PC.toWhom, fallback: "person.fill.questionmark").frame(width: 56, height: 56)
-                    Text("למי אכתוב?").font(Kid.font(36, .heavy)).foregroundStyle(Kid.ink)
-                    Spacer()
-                    GreenPill(title: selected.isEmpty ? "סגירה" : "סיום", icon: PC.send, action: done)
-                        .keyboardShortcut(.defaultAction)
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                PCImage(url: PC.toIcon, fallback: "envelope").frame(width: 50, height: 40)
+                Text("לכבוד:").font(Kid.font(26, .heavy)).foregroundStyle(Kid.ink)
+                if chosen.isEmpty {
+                    Text("בוחרים למטה למי לכתוב").font(Kid.font(22, .semibold)).foregroundStyle(Kid.ink.opacity(0.6))
+                } else {
+                    RecipientChips(chosen: chosen, remove: { id in selected.removeAll { $0 == id } }, max: 4)
                 }
-                HStack(spacing: 14) {
-                    ForEach(0..<tabs.count, id: \.self) { i in
-                        Pill(title: tabs[i].0, icon: tabs[i].1, symbol: tabs[i].2, selected: tab == i, height: 60) { tab = i }
-                    }
-                    Spacer()
-                }
-                let people = client.contacts.filter { tabs[tab].3.contains($0.group) }
-                KidScroll {
-                    IndexGrid(count: people.count, columns: 6, spacing: 12) { i in
-                        let c = people[i]
-                        let on = selected.contains(c.id)
-                        Button {
-                            if on { selected.removeAll { $0 == c.id } } else { selected.append(c.id) }
-                        } label: {
-                            VStack(spacing: 6) {
-                                Avatar(url: c.imageURL, size: 78, ring: on ? Kid.send : nil)
-                                    .overlay(alignment: .bottomTrailing) {
-                                        if on {
-                                            Image(systemName: "checkmark.circle.fill").font(.system(size: 28))
-                                                .foregroundStyle(.white, Kid.send).offset(x: 6, y: 6)
-                                        }
-                                    }
-                                Text(c.name).font(Kid.font(18, .bold)).foregroundStyle(Kid.ink)
-                                    .lineLimit(2).multilineTextAlignment(.center)
+                Spacer()
+                GreenPill(title: chosen.isEmpty ? "סגירה" : "המשך", icon: PC.send, action: done)
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 22).padding(.vertical, 10)
+            .frame(minHeight: 74)
+            .background(Kid.strip)
+
+            let t = tabs
+            let want = tab < 0 ? startTab : tab
+            let cur = t.indices.contains(want) ? want : 0
+            VStack(spacing: 0) {
+                HStack(alignment: .bottom, spacing: 10) {
+                    ForEach(0..<t.count, id: \.self) { i in
+                        Button { tab = i } label: {
+                            HStack(spacing: 12) {
+                                PCImage(url: t[i].1, fallback: t[i].2).frame(width: 64, height: 54)
+                                Text(t[i].0).font(Kid.font(24, i == cur ? .heavy : .bold)).foregroundStyle(Kid.ink)
                             }
-                            .frame(maxWidth: .infinity).padding(.vertical, 8)
-                            .background(RoundedRectangle(cornerRadius: 16).fill(on ? Kid.send.opacity(0.15) : .white))
+                            .padding(.horizontal, 20).frame(height: i == cur ? 82 : 74)
+                            .frame(maxWidth: 300)
+                            .background(UnevenRoundedRectangle(topLeadingRadius: 10, topTrailingRadius: 10).fill(.white))
+                            .overlay(UnevenRoundedRectangle(topLeadingRadius: 10, topTrailingRadius: 10)
+                                        .stroke(Kid.outline, lineWidth: i == cur ? 3 : 1.5))
+                            .overlay(alignment: .topTrailing) {
+                                Path { p in p.move(to: .zero); p.addLine(to: CGPoint(x: 26, y: 0)); p.addLine(to: CGPoint(x: 0, y: 26)) }
+                                    .fill(Kid.outline).frame(width: 26, height: 26)
+                                    .environment(\.layoutDirection, .leftToRight)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .zIndex(i == cur ? 1 : 0)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 30)
+
+                let people = t.isEmpty ? [] : client.contacts.filter { t[cur].3.contains($0.group) }
+                // "Select all" takes the real people, not the family shortcuts (they'd send twice).
+                let real = people.filter { $0.address.addressType != "SMTPAlias" }
+                let allOn = !real.isEmpty && real.allSatisfy { selected.contains($0.id) }
+                VStack(alignment: .leading, spacing: 14) {
+                    if real.count > 1 {
+                        Button {
+                            if allOn { selected.removeAll { id in real.contains { $0.id == id } } }
+                            else { for c in real where !selected.contains(c.id) { selected.append(c.id) } }
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: allOn ? "checkmark.circle.fill" : "person.3.fill")
+                                    .font(.system(size: 24)).foregroundStyle(Kid.outline)
+                                Text(allOn ? "ביטול הסימון" : "סימון כל " + t[cur].0.replacingOccurrences(of: " שלי", with: ""))
+                                    .font(Kid.font(22, .heavy)).foregroundStyle(Kid.ink)
+                            }
+                            .padding(.horizontal, 26).frame(height: 54)
+                            .background(Capsule().fill(.white))
+                            .overlay(Capsule().stroke(Kid.chipLine, lineWidth: 1.5))
                         }
                         .buttonStyle(.plain)
                     }
-                    .padding(4)
+                    GeometryReader { geo in
+                        KidScroll {
+                            IndexGrid(count: people.count, columns: max(2, min(5, Int(geo.size.width / 230))), spacing: 12) { i in
+                                PersonCard(contact: people[i], on: selected.contains(people[i].id)) {
+                                    let id = people[i].id
+                                    if selected.contains(id) { selected.removeAll { $0 == id } } else { selected.append(id) }
+                                }
+                            }
+                            .padding(4)
+                        }
+                    }
                 }
+                .padding(18)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Rectangle().fill(.white))
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Kid.outline, lineWidth: 3))
+                .padding(.horizontal, 26).padding(.bottom, 22)
+                .offset(y: -1.5)
             }
-            .padding(26)
-            .frame(maxWidth: 1000, maxHeight: 640)
-            .background(RoundedRectangle(cornerRadius: 28).fill(Kid.strip))
-            .overlay(RoundedRectangle(cornerRadius: 28).stroke(Kid.outline, lineWidth: 3))
-            .padding(30)
+            .padding(.top, 18)
+            .background(Color.white)
         }
+        .background(Color.white)
+    }
+}
+
+/// One person in the picker: name, picture, circle (filled when chosen).
+struct PersonCard: View {
+    var contact: Contact
+    var on: Bool
+    var action: () -> Void
+    @Local private var hover = false
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text(contact.name).font(Kid.font(22, .heavy)).foregroundStyle(Kid.ink)
+                    .lineLimit(2).minimumScaleFactor(0.75)
+                Spacer(minLength: 4)
+                PCImage(url: contact.imageURL, fallback: "face.smiling").frame(width: 62, height: 62)
+            }
+            .padding(.leading, 14).padding(.trailing, 30).frame(height: 84)
+            .background(RoundedRectangle(cornerRadius: 4).fill(on ? Kid.strip : .white))
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Kid.chipLine, lineWidth: on ? 2.5 : 1.5))
+            .overlay(alignment: .topTrailing) {
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22)).foregroundStyle(on ? Color.white : Kid.outline, Kid.outline)
+                    .padding(6)
+            }
+            .scaleEffect(hover ? 1.02 : 1).animation(.spring(duration: 0.2), value: hover)
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
     }
 }
 

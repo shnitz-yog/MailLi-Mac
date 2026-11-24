@@ -92,13 +92,14 @@ struct LetterView: View {
         let bg = backgroundImage ?? cache.image(content.backgroundURL)
         let body = ZStack(alignment: .topLeading) {
             LetterBackground(url: content.backgroundURL, image: bg, k: k)
-            textLayer(k, top: textTop(content.backgroundURL == nil ? nil : bg))
+            // Stamps under the words, so they never hide what was written.
             ForEach(content.stamps) { s in
                 if let shape = stamps.shape(s.url) {
                     let r = PlacedStampView.rect(shape, s, k)
                     PlacedStampView(shape: shape, stamp: s, scale: k).offset(x: r.minX, y: r.minY)
                 }
             }
+            textLayer(k, top: textTop(content.backgroundURL == nil ? nil : bg))
         }
         .frame(width: letterSize.width * k, height: letterSize.height * k, alignment: .topLeading)
         .clipped()
@@ -147,4 +148,33 @@ struct StampThumb: View {
             if s.hasStroke { ctx.stroke(p, with: .color(color), lineWidth: max(s.strokeWidth * k, 1)) }
         }
     }
+}
+
+/// The letter as a flat picture (for e-mailing to parents and for printing).
+@MainActor
+func renderLetter(_ content: LetterContent, stamps: StampLibrary, scale: CGFloat = 1) async -> NSImage? {
+    let bg = await ImageCache.shared.preload(content.backgroundURL)
+    let view = LetterView(content: content, stamps: stamps, backgroundImage: bg, export: true)
+        .frame(width: letterSize.width, height: letterSize.height)
+        .environment(\.layoutDirection, .rightToLeft)
+    let r = ImageRenderer(content: view)
+    r.scale = scale
+    return r.nsImage
+}
+
+/// "להדפיס": the macOS print window with the letter fitted to a landscape page.
+@MainActor
+func printLetter(_ img: NSImage) {
+    let v = NSImageView(frame: NSRect(x: 0, y: 0, width: letterSize.width, height: letterSize.height))
+    v.image = img
+    v.imageScaling = .scaleProportionallyUpOrDown
+    let info = (NSPrintInfo.shared.copy() as? NSPrintInfo) ?? NSPrintInfo()
+    info.orientation = .landscape
+    info.horizontalPagination = .fit
+    info.verticalPagination = .fit
+    info.isHorizontallyCentered = true
+    info.isVerticallyCentered = true
+    let op = NSPrintOperation(view: v, printInfo: info)
+    op.jobTitle = "מכתב ממייל לי"
+    op.run()
 }

@@ -13,6 +13,7 @@ enum ScreenShots {
             return doc.rootElement()
         }
         client.studentName = "דנה"
+        if let r = load("startup_googale.xml") { client.applyLabels(r) }
         if let r = load("GetMailABAndStamps.xml") { client.applyAddressBook(r) }
         if let r = load("GetLast100EmailsV5.xml") {
             var hs = MailLiClient.parseHeaders(r)
@@ -34,10 +35,11 @@ enum ScreenShots {
                               PC.readCrumb, PC.sentCrumb, PC.unreadEnvelope, PC.readEnvelope, PC.toEnvelope, PC.toIcon,
                               PC.back, PC.reply, PC.trash, PC.send, PC.toWhom, PC.writing, PC.greetings, PC.stamps,
                               PC.erase, PC.size, PC.move, PC.emoji, PC.enter, PC.backspace, PC.family, PC.friends, PC.staff,
-                              PC.sentOK] + PC.emojiTabs.map(\.1)
-        urls += client.contacts.prefix(24).map(\.imageURL)
+                              PC.sentOK, PC.print, PC.selectAll, PC.tellIcon] + PC.emojiTabs.map(\.1)
+        urls += client.contacts.map(\.imageURL)
         urls += (client.boxes[.inbox] ?? []).compactMap { $0.sender?.symbolURL }
         urls += client.backgrounds.prefix(8).map(\.url)
+        urls += client.backgrounds.map(\.icon)
         if let b = withGreeting?.backgroundURL { urls.append(b) }
         var done = false
         Task {
@@ -78,8 +80,21 @@ enum ScreenShots {
         shot("write", [home, write], WriteView(replyTo: client.boxes[.inbox]?.first?.sender, close: { _ in }))
         shot("write_small", [home, write], WriteView(replyTo: client.boxes[.inbox]?.first?.sender, close: { _ in }),
              CGSize(width: 1000, height: 680))
+        shot("stamps", [home, write], StampsPanel(colorCode: 1, add: { _ in }).frame(height: 132).background(Kid.strip),
+             CGSize(width: 1240, height: 220))
+        shot("write_empty", [home, write], WriteView(replyTo: nil, close: { _ in }))
         shot("picker", [home, write], RecipientPicker(selected: .constant([]), done: {}))
         shot("sent", [home, write], SendingOverlay(sent: true))
+        shot("greetings", [home, write], GreetingsPicker(selected: .constant(nil), done: {}))
+        let some = Array(client.contacts.filter { $0.group == "חברים בגן" }.prefix(5).map(\.id))
+        shot("picker_kids", [home, write], PickerAt(selected: some))
         return 0
     }
+}
+
+/// Picker opened on the kindergarten children tab (for screenshots).
+private struct PickerAt: View {
+    @Local var selected: [UUID]
+    init(selected: [UUID]) { _selected = Local(wrappedValue: selected) }
+    var body: some View { RecipientPicker(selected: $selected, done: {}, startTab: 2) }
 }

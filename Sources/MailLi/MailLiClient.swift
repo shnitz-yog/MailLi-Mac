@@ -32,6 +32,8 @@ final class MailLiClient: ObservableObject {
     @Published var contacts: [Contact] = []
     @Published var backgrounds: [BackgroundChoice] = []
     @Published var stampChoices: [StampChoice] = []
+    /// The PC app's Hebrew labels (VB Name → Text), e.g. greeting names.
+    var labels: [String: String] = [:]
     /// Last loaded letters per mailbox (so screens don't flash empty).
     @Published var boxes: [Mailbox: [MailHeader]] = [:]
 
@@ -127,6 +129,13 @@ final class MailLiClient: ObservableObject {
         studentID = sid
         studentName = (r.first("CurrentStudentName")?.stringValue ?? "").trimmingCharacters(in: .whitespaces)
         studentSymbol = r.first("CurrentStudentSymbolURL")?.stringValue ?? ""
+        applyLabels(r)
+    }
+
+    func applyLabels(_ r: XMLElement) {
+        for vb in r.all("VB") {
+            if let n = vb.attr("Name"), let t = vb.attr("Text") { labels[n] = t.trimmingCharacters(in: .whitespaces) }
+        }
     }
 
     // MARK: SOAP
@@ -202,6 +211,17 @@ final class MailLiClient: ObservableObject {
         _ = try await soap(mail, "IMailLiSVC", op, sidParam + "<MessageID>\(id)</MessageID>")
     }
 
+    /// Delete several letters in one call (the PC's "סימון" + "למחוק").
+    func delete(_ ids: [Int64], in box: Mailbox) async throws {
+        guard !ids.isEmpty else { return }
+        if ids.count == 1 { try await delete(ids[0], in: box); return }
+        let op = box == .inbox ? "DeleteMultipleMailleMessages" : "DeleteMultipleSentMailMessages"
+        let list = "<MessageIDList xmlns:b=\"http://schemas.microsoft.com/2003/10/Serialization/Arrays\">" +
+            ids.map { "<b:long>\($0)</b:long>" }.joined() + "</MessageIDList>"
+        let r = try await soap(mail, "IMailLiSVC", op, sidParam + list)
+        guard r.first(op + "Result")?.stringValue == "true" else { throw MailLiError.server("המחיקה לא הצליחה") }
+    }
+
     // MARK: address book, stamps, backgrounds
 
     func loadAddressBook() async throws {
@@ -216,10 +236,18 @@ final class MailLiClient: ObservableObject {
             stamps.add(url: url, xaml: x)
             stampChoices.append(StampChoice(url: url, xaml: x))
         }
-        backgrounds = r.all("BK").compactMap { b in
-            guard let u = b.attr("ImageURL") else { return nil }
-            return BackgroundChoice(name: b.attr("ButtonName") ?? "", url: u)
+        var bks: [BackgroundChoice] = []
+        let bkGroups = r.all("Group").filter { !$0.all("BK").isEmpty }
+        for (gi, g) in (bkGroups.isEmpty ? [r] : bkGroups).enumerated() {
+            for b in g.all("BK") {
+                guard let u = b.attr("ImageURL"), !bks.contains(where: { $0.url == u }) else { continue }
+                let n = b.attr("ButtonName") ?? ""
+                let fixed = n.replacingOccurrences(of: "MaiLli-", with: "MailLi-").replacingOccurrences(of: "Maili-", with: "MailLi-")
+                bks.append(BackgroundChoice(name: n, url: u, group: gi,
+                                            title: labels[n] ?? labels[fixed] ?? ""))
+            }
         }
+        backgrounds = bks
         var list: [Contact] = []
         let groups: [(String, String)] = [("Family", "משפחה"), ("HomeEmail", "משפחה"), ("Teacher", "הגננת"),
                                           ("StaffAddressBook", "צוות הגן"), ("StudentsAddressBook", "חברים בגן"),

@@ -13,6 +13,9 @@ struct MailLiApp: App {
         if let i = args.firstIndex(of: "--screens"), i + 1 < args.count {
             exit(MainActor.assumeIsolated { ScreenShots.run(args[i + 1]) })
         }
+        if args.contains("--update-test") {
+            exit(MainActor.assumeIsolated { Updater.commandLineTest() })
+        }
         // Run as a normal windowed app even when launched from the command line.
         NSApplication.shared.setActivationPolicy(.regular)
     }
@@ -28,6 +31,11 @@ struct MailLiApp: App {
         }
         .defaultSize(width: 1240, height: 800)
         .windowResizability(.contentMinSize)
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button("בדיקת עדכונים…") { Updater.shared.checkNow() }
+            }
+        }
     }
 }
 
@@ -70,6 +78,8 @@ struct RootView: View {
                 }
             }
         }
+        .overlay { UpdateOverlay() }
+        .onAppear { Updater.shared.checkOnLaunch() }
         .animation(.easeInOut(duration: 0.2), value: screen)
         .animation(.easeInOut(duration: 0.2), value: client.loggedIn)
         .confirmationDialog("לצאת מהחשבון?", isPresented: $confirmExit) {

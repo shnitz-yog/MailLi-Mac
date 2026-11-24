@@ -77,6 +77,10 @@ struct BackgroundChoice: Identifiable, Hashable {
     var id: String { url }
     var name: String
     var url: String
+    var group = 0          // 0 = ברכות, 1 = רציתי לספר (server order)
+    var title = ""         // Hebrew name (from the app's label list)
+    /// Round button picture the PC shows in the greetings picker.
+    var icon: String { "https://galeli.com/mailli.web/resources/" + name + ".png" }
 }
 
 struct StampChoice: Identifiable, Hashable {

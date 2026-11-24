@@ -62,7 +62,13 @@ struct ReadView: View {
                         GreenPill(title: "לענות", icon: PC.reply) { go(.write(s)) }
                     }
                     Spacer()
-                    Pill(title: "למחוק", icon: PC.trash, symbol: "trash") { confirmDelete = true }
+                    Pill(title: "למחוק", icon: PC.trash, symbol: "trash", fill: true) { confirmDelete = true }
+                    Pill(title: "להדפיס", icon: PC.print, symbol: "printer", fill: true) {
+                        guard let c = content ?? preloaded else { return }
+                        Task { if let img = await renderLetter(c, stamps: client.stamps, scale: 3) { printLetter(img) } }
+                    }
+                    .keyboardShortcut("p", modifiers: .command)
+                    .disabled(content == nil && preloaded == nil)
                 }
                 .frame(width: 170)
                 .padding(.vertical, 6)

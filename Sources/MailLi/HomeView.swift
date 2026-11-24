@@ -58,13 +58,17 @@ struct Tile: View {
     }
 }
 
-/// Letters received (or sent) as envelopes.
+/// Letters received (or sent), laid out like the PC: three columns of cards
+/// (envelope + date, "מאת:" + name, the sender's picture). Each card has a
+/// circle for marking; "סימון הכל" / "ביטול בחירה" at the top, "למחוק" below.
 struct ListView: View {
     @EnvironmentObject var client: MailLiClient
     var box: Mailbox
     var go: (Screen) -> Void
     @Local private var loading = false
     @Local private var error: String? = nil
+    @Local private var marked: Set<Int64> = []
+    @Local private var confirmDelete = false
 
     private var letters: [MailHeader] { client.boxes[box] ?? [] }
 
@@ -81,6 +85,11 @@ struct ListView: View {
                     go(.list(box == .inbox ? .sent : .inbox))
                 }
                 Spacer()
+                if !letters.isEmpty {
+                    Pill(title: "סימון הכל", height: 44) { marked = Set(letters.map(\.id)) }
+                    Pill(title: "ביטול בחירה", icon: PC.selectAll, symbol: "checkmark.circle", height: 44) { marked = [] }
+                        .disabled(marked.isEmpty).opacity(marked.isEmpty ? 0.45 : 1)
+                }
                 RoundButton(icon: "arrow.clockwise", size: 46, help: "רענון") { Task { await reload() } }
                     .rotationEffect(.degrees(loading ? 360 : 0))
                     .animation(loading ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: loading)
@@ -88,9 +97,25 @@ struct ListView: View {
             .padding(.horizontal, 24).padding(.vertical, 12)
             .background(Kid.strip)
 
-            content.padding(24)
+            content.padding(.horizontal, 24).padding(.top, 20)
+
+            if !marked.isEmpty {
+                HStack {
+                    Pill(title: marked.count == 1 ? "למחוק מכתב אחד" : "למחוק \(marked.count) מכתבים",
+                         icon: PC.trash, symbol: "trash") { confirmDelete = true }
+                        .keyboardShortcut(.delete, modifiers: [])
+                }
+                .padding(.vertical, 14)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
-        .task(id: box) { await reload() }
+        .animation(.spring(duration: 0.25), value: marked.isEmpty)
+        .task(id: box) { marked = []; await reload() }
+        .confirmationDialog(marked.count == 1 ? "למחוק את המכתב?" : "למחוק \(marked.count) מכתבים?",
+                            isPresented: $confirmDelete) {
+            Button("מחיקה", role: .destructive) { Task { await deleteMarked() } }
+            Button("ביטול", role: .cancel) {}
+        }
     }
 
     @ViewBuilder private var content: some View {
@@ -110,8 +135,11 @@ struct ListView: View {
             GeometryReader { geo in
                 KidScroll {
                     let list = letters
-                    IndexGrid(count: list.count, columns: max(1, Int((geo.size.width - 8) / 230)), spacing: 18) { i in
-                        EnvelopeCard(header: list[i], box: box) { go(.read(list[i], box)) }
+                    IndexGrid(count: list.count, columns: max(1, min(4, Int((geo.size.width - 8) / 330))), spacing: 16) { i in
+                        let h = list[i]
+                        EnvelopeCard(header: h, box: box, marked: marked.contains(h.id),
+                                     mark: { if marked.contains(h.id) { marked.remove(h.id) } else { marked.insert(h.id) } },
+                                     action: { go(.read(h, box)) })
                     }
                     .padding(4)
                 }
@@ -125,12 +153,24 @@ struct ListView: View {
         do { try await client.refresh(box); error = nil }
         catch { self.error = error.localizedDescription }
     }
+
+    private func deleteMarked() async {
+        let ids = letters.map(\.id).filter { marked.contains($0) }
+        do {
+            try await client.delete(ids, in: box)
+            client.boxes[box]?.removeAll { marked.contains($0.id) }
+            marked = []
+        } catch { self.error = error.localizedDescription }
+    }
 }
 
-/// One letter: envelope picture (closed = new), who, and the date.
+/// One letter card, as on the PC: envelope (closed = new) with the date under it,
+/// "מאת:" and the name, the person's picture in a square, a marking circle in the corner.
 struct EnvelopeCard: View {
     var header: MailHeader
     var box: Mailbox
+    var marked = false
+    var mark: () -> Void = {}
     var action: () -> Void
     @Local private var hover = false
 
@@ -138,32 +178,45 @@ struct EnvelopeCard: View {
         let who = box == .inbox ? header.sender : header.recipient
         let isNew = box == .inbox && !header.read
         Button(action: action) {
-            VStack(spacing: 10) {
-                ZStack(alignment: .topLeading) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(spacing: 4) {
                     PCImage(url: box == .sent ? PC.toEnvelope : (isNew ? PC.unreadEnvelope : PC.readEnvelope), fallback: "envelope")
-                        .frame(height: 96)
-                        .frame(maxWidth: .infinity)
+                        .frame(width: 70, height: 62)
+                    Text(kidDate(header.time)).font(Kid.font(14, .semibold)).foregroundStyle(Kid.ink.opacity(0.8))
+                        .lineLimit(1).fixedSize()
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(box == .inbox ? "מאת:" : "לכבוד:").font(Kid.font(17, .heavy)).foregroundStyle(Kid.outline)
+                    Text(who?.name ?? "").font(Kid.font(20, .heavy)).foregroundStyle(Kid.ink)
+                        .lineLimit(2).minimumScaleFactor(0.8)
                     if isNew {
-                        Text("חדש!").font(Kid.font(16, .heavy)).foregroundStyle(.white)
-                            .padding(.horizontal, 10).padding(.vertical, 4)
-                            .background(Capsule().fill(.red)).rotationEffect(.degrees(-8))
+                        Text("חדש!").font(Kid.font(14, .heavy)).foregroundStyle(.white)
+                            .padding(.horizontal, 8).padding(.vertical, 2)
+                            .background(Capsule().fill(.red))
                     }
                 }
-                HStack(spacing: 8) {
-                    Avatar(url: who?.symbolURL, size: 40)
-                    Text(who?.name ?? "").font(Kid.font(21, .heavy)).foregroundStyle(Kid.ink).lineLimit(1)
-                }
-                .padding(.horizontal, 10).frame(height: 50)
-                .frame(maxWidth: .infinity)
-                .background(RoundedRectangle(cornerRadius: 6).fill(.white))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Kid.chipLine, lineWidth: 2))
-                Text(kidDate(header.time)).font(Kid.font(16, .medium)).foregroundStyle(Kid.ink.opacity(0.7))
+                Spacer(minLength: 4)
+                PCImage(url: who?.symbolURL, fallback: "face.smiling")
+                    .padding(6)
+                    .frame(width: 74, height: 74)
+                    .overlay(Rectangle().stroke(Kid.outline, lineWidth: 1))
             }
-            .padding(14)
+            .padding(.horizontal, 12).padding(.vertical, 10)
             .frame(maxWidth: .infinity)
-            .background(RoundedRectangle(cornerRadius: 22).fill(isNew ? Color(hex: "#FFFFF7D6")! : .white))
-            .shadow(color: .black.opacity(hover ? 0.15 : 0.05), radius: hover ? 10 : 3, y: hover ? 5 : 1)
-            .scaleEffect(hover ? 1.03 : 1)
+            .background(RoundedRectangle(cornerRadius: 6).fill(isNew ? Color(hex: "#FFFFF7D6")! : .white))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(marked ? Kid.outline : .clear, lineWidth: 3))
+            .overlay(alignment: .topLeading) {
+                Button(action: mark) {
+                    Image(systemName: marked ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundStyle(marked ? Color.white : Kid.outline, Kid.outline)
+                        .background(Circle().fill(.white).padding(2))
+                        .frame(width: 34, height: 34).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).help(marked ? "ביטול סימון" : "סימון")
+            }
+            .shadow(color: .black.opacity(hover ? 0.15 : 0.04), radius: hover ? 8 : 2, y: hover ? 4 : 1)
+            .scaleEffect(hover ? 1.02 : 1)
             .animation(.spring(duration: 0.2), value: hover)
         }
         .buttonStyle(.plain)
