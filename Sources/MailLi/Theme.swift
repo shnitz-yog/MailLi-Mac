@@ -140,6 +140,7 @@ struct Pill: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
+        .speaks(title)
     }
 
     @ViewBuilder private var iconView: some View {
@@ -173,6 +174,7 @@ struct GreenPill: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
+        .speaks(title)
     }
 }
 
@@ -204,6 +206,7 @@ struct TopBar: View {
                     .overlay(Capsule().stroke(Kid.bar, lineWidth: 3))
                 }
                 .buttonStyle(.plain)
+                .speaks(c.title)
                 .allowsHitTesting(c.action != nil)
                 .padding(.leading, i == 0 ? 0 : -14)
                 .zIndex(Double(crumbs.count - i))
@@ -215,6 +218,8 @@ struct TopBar: View {
             }
             .padding(.horizontal, 16).frame(height: 46)
             .background(RoundedRectangle(cornerRadius: 6).fill(.white))
+            .speaks(client.studentName)
+            SpeechToggle().padding(.leading, 10)
             Button(action: onExit) {
                 Image(systemName: "rectangle.portrait.and.arrow.right").font(.system(size: 16, weight: .bold))
                     .foregroundStyle(Kid.ink.opacity(0.45)).frame(width: 34, height: 34)
@@ -246,6 +251,7 @@ struct RoundButton: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        .speaks(help)
     }
 }
 

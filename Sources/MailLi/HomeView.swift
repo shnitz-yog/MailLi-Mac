@@ -55,6 +55,7 @@ struct Tile: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
+        .speaks(title)
     }
 }
 
@@ -221,5 +222,7 @@ struct EnvelopeCard: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
+        .speaks((box == .inbox ? "מכתב מ" : "מכתב ל") + ((box == .inbox ? header.sender : header.recipient)?.name ?? "")
+                + (box == .inbox && !header.read ? ". מכתב חדש" : ""))
     }
 }

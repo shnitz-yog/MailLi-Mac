@@ -89,6 +89,7 @@ struct WriteView: View {
                     .background(Capsule().fill(Kid.outline))
                 }
                 .buttonStyle(.plain)
+                .speaks("לְמִי אֶכְתֹּב?")
                 HStack(spacing: 0) {
                     Text("‑ ‑ ‑ ‑ ‑ ‑").font(Kid.font(20, .heavy)).foregroundStyle(Kid.outline)
                     Image(systemName: "arrowtriangle.left.fill").font(.system(size: 16)).foregroundStyle(Kid.outline)
@@ -401,8 +402,8 @@ struct HebrewKeyboard: View {
                     ForEach(row1, id: \.self) { ch in Key(label: ch, width: unit, height: h) { text += ch } }
                 }
                 HStack(spacing: gap) {
-                    Key(image: PC.enter, symbol: "return", width: unit * 1.4, height: h) { text += "\n" }
-                    Key(image: PC.backspace, symbol: "delete.right", width: unit * 1.4, height: h) { if !text.isEmpty { text.removeLast() } }
+                    Key(image: PC.enter, symbol: "return", spoken: "שׁוּרָה חֲדָשָׁה", width: unit * 1.4, height: h) { text += "\n" }
+                    Key(image: PC.backspace, symbol: "delete.right", spoken: "מְחִיקָה", width: unit * 1.4, height: h) { if !text.isEmpty { text.removeLast() } }
                     ForEach(marks, id: \.self) { ch in Key(label: ch, width: unit, height: h) { text += ch } }
                     Key(label: "רווח", width: max(unit, spaceW), height: h) { text += " " }
                     ForEach(digits, id: \.self) { ch in Key(label: ch, width: unit, height: h) { text += ch } }
@@ -419,6 +420,7 @@ struct Key: View {
     var label: String? = nil
     var image: String? = nil
     var symbol: String = "questionmark"
+    var spoken: String? = nil
     var width: CGFloat
     var height: CGFloat
     var action: () -> Void
@@ -434,6 +436,7 @@ struct Key: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .speaks(spoken ?? Speaker.keyName(label ?? ""))
     }
 }
 
@@ -526,6 +529,7 @@ struct GreetingsPicker: View {
                                 }
                             }
                             .buttonStyle(.plain)
+                            .speaks(tabs[i].0)
                         }
                     }
                     .padding(.vertical, 12)
@@ -581,6 +585,7 @@ struct GreetingsPicker: View {
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(on ? Kid.send : .clear, lineWidth: 4))
         }
         .buttonStyle(.plain)
+        .speaks(title)
     }
 }
 
@@ -624,6 +629,7 @@ struct StampsPanel: View {
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Kid.outline, lineWidth: 2))
                 }
                 .buttonStyle(.plain).help("להוסיף אימוג'י למכתב")
+                .speaks("אִימוֹגִ'י")
                 VStack(alignment: .leading, spacing: spacing) {
                     ForEach([0, 1], id: \.self) { row in
                         HStack(spacing: spacing) {
@@ -654,7 +660,7 @@ struct ColorPanel: View {
                         Circle().fill(Color(hex: c.hex) ?? .black).frame(width: 52, height: 52)
                             .overlay(Circle().stroke(.white, lineWidth: 4))
                             .overlay(Circle().stroke(Kid.ink, lineWidth: colorCode == c.code ? 4 : 0).padding(-5))
-                    }.buttonStyle(.plain).help(c.name)
+                    }.buttonStyle(.plain).help(c.name).speaks(c.name)
                 }
             }
             Text("הצבע של הכתב ושל החותמות החדשות. לוחצים על חותמת כדי לצבוע אותה.")
@@ -778,6 +784,7 @@ struct RecipientPicker: View {
                             }
                         }
                         .buttonStyle(.plain)
+                        .speaks(t[i].0)
                         .zIndex(i == cur ? 1 : 0)
                     }
                     Spacer(minLength: 0)
@@ -805,6 +812,7 @@ struct RecipientPicker: View {
                             .overlay(Capsule().stroke(Kid.chipLine, lineWidth: 1.5))
                         }
                         .buttonStyle(.plain)
+                        .speaks(allOn ? "ביטול הסימון" : "סימון כל " + t[cur].0.replacingOccurrences(of: " שלי", with: ""))
                     }
                     GeometryReader { geo in
                         KidScroll {
@@ -858,6 +866,7 @@ struct PersonCard: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
+        .speaks(contact.name)
     }
 }
 

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import AVFoundation
 
 @main
 struct MailLiApp: App {
@@ -12,6 +13,19 @@ struct MailLiApp: App {
         }
         if let i = args.firstIndex(of: "--screens"), i + 1 < args.count {
             exit(MainActor.assumeIsolated { ScreenShots.run(args[i + 1]) })
+        }
+        if let i = args.firstIndex(of: "--login-store-test"), i + 1 < args.count {
+            exit(SavedLogin.commandLineTest(args[i + 1]))
+        }
+        if args.contains("--speech-test") {
+            exit(MainActor.assumeIsolated { () -> Int32 in
+                let v = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("he") }
+                print("hebrew voices:", v.map { "\($0.name) \($0.quality.rawValue)" })
+                Speaker.shared.enabled = true
+                Speaker.shared.say("שָׁלוֹם, זֶה מֵיְיל לִי")
+                RunLoop.main.run(until: Date().addingTimeInterval(3))
+                return v.isEmpty ? 1 : 0
+            })
         }
         if args.contains("--update-test") {
             exit(MainActor.assumeIsolated { Updater.commandLineTest() })
@@ -84,7 +98,7 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.2), value: client.loggedIn)
         .confirmationDialog("לצאת מהחשבון?", isPresented: $confirmExit) {
             Button("יציאה", role: .destructive) {
-                Keychain.delete(user: UserDefaults.standard.string(forKey: "lastUser") ?? "")
+                SavedLogin.delete(user: UserDefaults.standard.string(forKey: "lastUser") ?? "")
                 screen = .home
                 client.logout()
             }
@@ -156,7 +170,7 @@ struct LoginView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             user = savedUser
-            if remember, !savedUser.isEmpty, let p = Keychain.load(user: savedUser) {
+            if remember, !savedUser.isEmpty, let p = SavedLogin.load(user: savedUser) {
                 password = p
                 Task { await doLogin() }
             }
@@ -186,7 +200,7 @@ struct LoginView: View {
         do {
             try await client.login(user: u, password: password)
             savedUser = u
-            if remember { Keychain.save(user: u, password: password) } else { Keychain.delete(user: u) }
+            if remember { SavedLogin.save(user: u, password: password) } else { SavedLogin.delete(user: u) }
             password = ""
         } catch {
             self.error = error.localizedDescription

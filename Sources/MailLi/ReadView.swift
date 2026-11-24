@@ -112,6 +112,7 @@ struct PersonChip: View {
             Text(name).font(Kid.font(22, .heavy)).foregroundStyle(Kid.ink).lineLimit(1)
         }
         .padding(.horizontal, 14).frame(height: 54)
+        .speaks(name)
         .background(RoundedRectangle(cornerRadius: 4).fill(.white))
         .overlay(RoundedRectangle(cornerRadius: 4).stroke(Kid.chipLine, lineWidth: 2))
         .overlay(alignment: .topLeading) {

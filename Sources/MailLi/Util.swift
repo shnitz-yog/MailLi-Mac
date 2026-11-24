@@ -1,4 +1,6 @@
 import Foundation
+import CryptoKit
+import IOKit
 import Compression
 import SwiftUI
 
@@ -150,31 +152,92 @@ func firstMatch(_ pattern: String, in s: String) -> String? {
 
 // MARK: - Keychain (remember password on this Mac only)
 
-enum Keychain {
-    static let service = "MailLiMac"
+/// The "remember me" password.
+///
+/// Not in the Keychain: macOS ties a keychain entry to the exact build that
+/// saved it (its "cdhash"), and this app isn't signed with an Apple developer
+/// certificate, so after every update macOS would ask for the Mac's password
+/// ("wants to use your confidential information stored in MailLiMac").
+///
+/// Instead: a file in ~/Library/Application Support/MailLiMac that only this
+/// Mac user can open (0600), encrypted (AES-GCM) with a key made from this
+/// Mac's hardware ID, so a copied file is useless on another computer.
+/// Programs running as the same Mac user could still read it. That's fine for
+/// a kindergarten mail password, but it's why the README says so.
+enum SavedLogin {
+    private static var dir: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("MailLiMac", isDirectory: true)
+    }
+    private static var file: URL { dir.appendingPathComponent("login.dat") }
+
+    private static var key: SymmetricKey {
+        let hw = hardwareUUID() ?? "mailli-no-hwid"
+        let k = HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: Data(hw.utf8)),
+                                       salt: Data("MailLiMac.SavedLogin.v1".utf8),
+                                       info: Data(NSUserName().utf8), outputByteCount: 32)
+        return k
+    }
+
+    private static func hardwareUUID() -> String? {
+        let svc = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
+        guard svc != 0 else { return nil }
+        defer { IOObjectRelease(svc) }
+        return IORegistryEntryCreateCFProperty(svc, kIOPlatformUUIDKey as CFString, kCFAllocatorDefault, 0)?
+            .takeRetainedValue() as? String
+    }
+
+    private static func readAll() -> [String: String] {
+        guard let d = try? Data(contentsOf: file),
+              let box = try? AES.GCM.SealedBox(combined: d),
+              let plain = try? AES.GCM.open(box, using: key),
+              let m = try? JSONDecoder().decode([String: String].self, from: plain) else { return [:] }
+        return m
+    }
+
+    private static func writeAll(_ m: [String: String]) {
+        let fm = FileManager.default
+        if m.isEmpty { try? fm.removeItem(at: file); return }
+        guard let plain = try? JSONEncoder().encode(m),
+              let sealed = try? AES.GCM.seal(plain, using: key).combined else { return }
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let tmp = dir.appendingPathComponent("login.tmp")
+        guard fm.createFile(atPath: tmp.path, contents: sealed, attributes: [.posixPermissions: 0o600]) else { return }
+        _ = try? fm.replaceItemAt(file, withItemAt: tmp)
+    }
+
     static func save(user: String, password: String) {
-        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                kSecAttrService as String: service,
-                                kSecAttrAccount as String: user]
-        SecItemDelete(q as CFDictionary)
-        var add = q
-        add[kSecValueData as String] = Data(password.utf8)
-        SecItemAdd(add as CFDictionary, nil)
+        var m = readAll(); m[user] = password; writeAll(m)
+        forgetOldKeychainEntry(user)
     }
-    static func load(user: String) -> String? {
-        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                kSecAttrService as String: service,
-                                kSecAttrAccount as String: user,
-                                kSecReturnData as String: true]
-        var out: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data else { return nil }
-        return String(data: d, encoding: .utf8)
-    }
+    static func load(user: String) -> String? { readAll()[user] }
     static func delete(user: String) {
+        var m = readAll(); m[user] = nil; writeAll(m)
+        forgetOldKeychainEntry(user)
+    }
+
+    /// Version 1.0 kept the password in the Keychain. Never read it (that's what
+    /// made macOS ask); just try to remove it, with macOS's dialogs switched off.
+    private static func forgetOldKeychainEntry(_ user: String) {
+        var was: DarwinBoolean = true
+        SecKeychainGetUserInteractionAllowed(&was)
+        SecKeychainSetUserInteractionAllowed(false)
+        defer { SecKeychainSetUserInteractionAllowed(was.boolValue) }
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                kSecAttrService as String: service,
+                                kSecAttrService as String: "MailLiMac",
                                 kSecAttrAccount as String: user]
         SecItemDelete(q as CFDictionary)
+    }
+
+    /// `MailLi --login-store-test save|load|delete` with a test entry only.
+    static func commandLineTest(_ what: String) -> Int32 {
+        let u = "__mailli_store_test__"
+        switch what {
+        case "save": save(user: u, password: "test-value"); print("saved")
+        case "load": print(load(user: u) == "test-value" ? "loaded" : "NOT READABLE")
+        default: delete(user: u); print("deleted")
+        }
+        return 0
     }
 }
 
