@@ -3,7 +3,11 @@ import SwiftUI
 /// Logical page size of a MailLi letter (stamps are positioned in these units).
 /// Matches the 732×444 picture the Windows app sends to parents.
 let letterSize = CGSize(width: 732, height: 444)
-let letterTopMargin: CGFloat = 10
+let letterTopMargin: CGFloat = 0      // PC: greeting touches the top edge
+
+/// Our own "lined paper" choice (Mac only). Sent to the server as the plain
+/// default page, which is what the PC shows.
+let linedPaper = "Lined"
 
 /// Where the greeting picture sits: top centre at its natural size (as on the PC),
 /// shrunk only if it doesn't fit. Returns nil when there is no picture yet.
@@ -18,7 +22,18 @@ func greetingRect(_ img: NSImage?) -> CGRect? {
 
 /// Top of the text area in letter units: below the greeting picture, if any.
 func textTop(_ img: NSImage?) -> CGFloat {
-    (greetingRect(img)?.maxY ?? 8) + 12
+    // Measured on the PC: text starts ~10 points under the greeting picture.
+    (greetingRect(img)?.maxY ?? 8) + 10
+}
+
+/// Height of one written line at this size (same font as the letter text).
+func letterLineHeight(_ size: CGFloat) -> CGFloat {
+    let f = letterNSFont(size)
+    return NSLayoutManager().defaultLineHeight(for: f)
+}
+func letterNSFont(_ size: CGFloat) -> NSFont {
+    let base = NSFont.systemFont(ofSize: size, weight: .semibold)
+    return base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: size) } ?? base
 }
 
 /// White page with the greeting picture at the top (letter units scaled by k).
@@ -26,11 +41,16 @@ struct LetterBackground: View {
     var url: String?
     var image: NSImage? = nil
     var k: CGFloat
+    var fontSize: CGFloat = 34
+    var top: CGFloat = 0
+    var color: String? = nil        // page colour ("#AARRGGBB"), from the PC's backgrounds
     @ObservedObject private var cache = ImageCache.shared
     var body: some View {
-        let img = image ?? cache.image(url)
+        let img = url == linedPaper ? nil : (image ?? cache.image(url))
         ZStack(alignment: .topLeading) {
             Color.white
+            if let c = color.flatMap({ Color(hex: $0) }), !(color?.uppercased().hasPrefix("#00") ?? true) { c }
+            if url == linedPaper { lines }
             if let img, let r = greetingRect(img) {
                 Image(nsImage: img).resizable()
                     .frame(width: r.width * k, height: r.height * k)
@@ -38,6 +58,24 @@ struct LetterBackground: View {
             }
         }
         .frame(width: letterSize.width * k, height: letterSize.height * k, alignment: .topLeading)
+    }
+
+    /// Notebook lines under each written line, and a red margin on the right.
+    private var lines: some View {
+        Canvas { ctx, size in
+            let f = letterNSFont(fontSize)
+            let lh = letterLineHeight(fontSize)
+            var y = top + f.ascender + 0.28 * lh      // just under the first baseline
+            while y < letterSize.height - 6 {
+                ctx.stroke(Path { p in p.move(to: CGPoint(x: 16 * k, y: y * k)); p.addLine(to: CGPoint(x: size.width - 16 * k, y: y * k)) },
+                           with: .color(Color(red: 0.55, green: 0.75, blue: 0.95)), lineWidth: max(1, 1.2 * k))
+                y += lh
+            }
+            let mx = size.width - 18 * k
+            ctx.stroke(Path { p in p.move(to: CGPoint(x: mx, y: 0)); p.addLine(to: CGPoint(x: mx, y: size.height)) },
+                       with: .color(Color.red.opacity(0.35)), lineWidth: max(1, 1.2 * k))
+        }
+        .allowsHitTesting(false)
     }
 }
 
@@ -91,7 +129,10 @@ struct LetterView: View {
     @ViewBuilder private func page(_ k: CGFloat) -> some View {
         let bg = backgroundImage ?? cache.image(content.backgroundURL)
         let body = ZStack(alignment: .topLeading) {
-            LetterBackground(url: content.backgroundURL, image: bg, k: k)
+            LetterBackground(url: content.backgroundURL, image: bg, k: k,
+                             fontSize: content.runs.first?.size ?? 34,
+                             top: textTop(content.backgroundURL == nil ? nil : bg),
+                             color: content.backgroundColor)
             // Stamps under the words, so they never hide what was written.
             ForEach(content.stamps) { s in
                 if let shape = stamps.shape(s.url) {

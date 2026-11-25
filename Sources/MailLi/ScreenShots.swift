@@ -29,6 +29,7 @@ enum ScreenShots {
         }
         let withGreeting = letter("GetmailMessage.xml")
         let plain = letter("GetmailMessage_inbox0.xml")
+        let sentLetter = letter("GetSentMailMessage.xml")
 
         // Fetch pictures used on these screens (public PC assets + people + greeting).
         var urls: [String] = [PC.writeLetter, PC.receiveLetter, PC.sentLetters, PC.mailLi, PC.writeCrumb, PC.receiveCrumb,
@@ -41,6 +42,7 @@ enum ScreenShots {
         urls += client.backgrounds.prefix(8).map(\.url)
         urls += client.backgrounds.map(\.icon)
         if let b = withGreeting?.backgroundURL { urls.append(b) }
+        if let b = sentLetter?.backgroundURL { urls.append(b) }
         var done = false
         Task {
             await withTaskGroup(of: Void.self) { g in
@@ -82,6 +84,12 @@ enum ScreenShots {
              CGSize(width: 1000, height: 680))
         shot("stamps", [home, write], StampsPanel(colorCode: 1, add: { _ in }).frame(height: 132).background(Kid.strip),
              CGSize(width: 1240, height: 220))
+        if let h = client.boxes[.sent]?.first {
+            shot("read_sent", [home], ReadView(header: h, box: .sent, go: { _ in }, preloaded: sentLetter))
+        }
+        shot("lined", [home, recv], ReadView(header: client.boxes[.inbox]!.first!, box: .inbox, go: { _ in },
+                 preloaded: LetterContent(runs: [TextRun(text: "שורה ראשונה\nשורה שנייה\nשורה שלישית", color: KidStyle.color(1), size: KidStyle.size(3))],
+                                          backgroundURL: linedPaper)))
         shot("write_empty", [home, write], WriteView(replyTo: nil, close: { _ in }))
         shot("picker", [home, write], RecipientPicker(selected: .constant([]), done: {}))
         shot("sent", [home, write], SendingOverlay(sent: true))

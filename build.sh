@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 
 DIST=0
 [ "${1:-}" = "--dist" ] && DIST=1
-VERSION="1.1"
+VERSION="1.2"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

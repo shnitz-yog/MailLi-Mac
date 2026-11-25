@@ -96,7 +96,7 @@ enum Zlib {
 
 /// Server returns http:// links; macOS apps need https (the server supports it).
 func secureURL(_ s: String?, base: String = "https://galeli.com/MailLi.Web/Resources/") -> URL? {
-    guard var s = s?.trimmingCharacters(in: .whitespaces), !s.isEmpty, s != "Default" else { return nil }
+    guard var s = s?.trimmingCharacters(in: .whitespaces), !s.isEmpty, s != "Default", s != linedPaper else { return nil }
     if !s.lowercased().hasPrefix("http") { s = base + s }
     if s.lowercased().hasPrefix("http://") { s = "https://" + s.dropFirst(7) }
     return URL(string: s)

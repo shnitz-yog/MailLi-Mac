@@ -245,7 +245,7 @@ struct LetterContent: Hashable {
             }
             x += "  </Stamps>\n"
         }
-        if let bg = backgroundURL {
+        if let bg = backgroundURL, bg != linedPaper {
             x += "  <Background URL=\"\(xmlEscape(bg))\" Color=\"#00FFFFFF\" />\n"
         } else {
             x += "  <Background URL=\"Default\" FontSize=\"0\" VerticalLine=\"true\" />\n"

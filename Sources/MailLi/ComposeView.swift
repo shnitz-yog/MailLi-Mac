@@ -208,7 +208,7 @@ struct WriteView: View {
 
     private func send() async {
         if chosen.isEmpty { picking = true; return }
-        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && stamps.isEmpty && background == nil {
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && stamps.isEmpty && (background == nil || background == linedPaper) {
             show("המכתב עוד ריק ✏️"); return
         }
         sending = true
@@ -265,7 +265,7 @@ struct EditableLetter: View {
     private func page(_ k: CGFloat) -> some View {
         let top = textTop(background == nil ? nil : cache.image(background))
         return ZStack(alignment: .topLeading) {
-            LetterBackground(url: background, k: k)
+            LetterBackground(url: background, k: k, fontSize: fontSize, top: top)
                 .onTapGesture { focused = true }
             // Stamps under the words (as on the PC); while a stamp tool is on,
             // the text lets clicks through to them.
@@ -539,11 +539,13 @@ struct GreetingsPicker: View {
                     let list = client.backgrounds.filter { $0.group == group }
                     GeometryReader { geo in
                         KidScroll {
-                            IndexGrid(count: list.count + 1, columns: max(3, Int((geo.size.width - 20) / 118)), spacing: 12) { i in
+                            IndexGrid(count: list.count + 2, columns: max(3, Int((geo.size.width - 20) / 118)), spacing: 12) { i in
                                 if i == 0 {
                                     cell(title: "בלי ברכה", icon: nil, on: selected == nil) { selected = nil; done() }
+                                } else if i == 1 {
+                                    cell(title: "דף שורות", icon: nil, lined: true, on: selected == linedPaper) { selected = linedPaper; done() }
                                 } else {
-                                    let b = list[i - 1]
+                                    let b = list[i - 2]
                                     cell(title: b.title.isEmpty ? b.name : b.title, icon: b.icon, fallbackURL: b.url,
                                          on: selected == b.url) { selected = b.url; done() }
                                 }
@@ -564,12 +566,18 @@ struct GreetingsPicker: View {
         }
     }
 
-    private func cell(title: String, icon: String?, fallbackURL: String? = nil, on: Bool,
+    private func cell(title: String, icon: String?, fallbackURL: String? = nil, lined: Bool = false, on: Bool,
                       action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 4) {
                 Group {
-                    if let icon {
+                    if lined {
+                        VStack(spacing: 9) { ForEach(0..<5, id: \.self) { _ in Rectangle().fill(Color(red: 0.55, green: 0.75, blue: 0.95)).frame(height: 2) } }
+                            .padding(.horizontal, 14).padding(.vertical, 12)
+                            .background(Circle().fill(.white))
+                            .overlay(alignment: .trailing) { Rectangle().fill(Color.red.opacity(0.4)).frame(width: 2).padding(.trailing, 18) }
+                            .clipShape(Circle())
+                    } else if let icon {
                         GreetingIcon(icon: icon, fallback: fallbackURL)
                     } else {
                         Image(systemName: "nosign").font(.system(size: 34)).foregroundStyle(Kid.outline)
